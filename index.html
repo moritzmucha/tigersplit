@@ -143,11 +143,7 @@
   <div id="graph"></div>
 
   <!-- d3 for the force-directed graph -->
-  <script
-    src="https://d3js.org/d3.v7.min.js"
-    integrity="DQo5aAM/Pz8/UgwFJD8/PT8/Xz8/Pz8wPwU/Pz8/IT8/P19bOD8OPz4aV3Y/Hz8/Pw0K"
-    crossorigin="anonymous">
-  </script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
 
   <script>
     /*****************************************************************************
@@ -176,12 +172,12 @@
     const transactionsTableBody = document.querySelector('#transactions-table tbody');
 
     expenseForm.addEventListener('submit', e => {
-      e.preventDefault();
-      const name = expenseNameInput.value.trim();
-      const amount = parseFloat(expenseAmountInput.value);
-      const label = expenseLabelInput.value.trim();
-      if (!name || isNaN(amount)) return;
-      expenses.push({ payer: name, amount, label });
+    e.preventDefault();
+    const name = expenseNameInput.value.trim().toLowerCase();
+    const amount = parseFloat(expenseAmountInput.value);
+    const label = expenseLabelInput.value.trim();
+    if (!name || isNaN(amount)) return;
+    expenses.push({ payer: name, amount, label });
       expenseNameInput.value = '';
       expenseAmountInput.value = '';
       expenseLabelInput.value = '';
@@ -189,12 +185,12 @@
     });
 
     paymentForm.addEventListener('submit', e => {
-      e.preventDefault();
-      const from = paymentFromInput.value.trim();
-      const to = paymentToInput.value.trim();
-      const amount = parseFloat(paymentAmountInput.value);
-      if (!from || !to || isNaN(amount)) return;
-      payments.push({ from, to, amount });
+    e.preventDefault();
+    const from = paymentFromInput.value.trim().toLowerCase();
+    const to = paymentToInput.value.trim().toLowerCase();
+    const amount = parseFloat(paymentAmountInput.value);
+    if (!from || !to || isNaN(amount)) return;
+    payments.push({ from, to, amount });
       paymentFromInput.value = '';
       paymentToInput.value = '';
       paymentAmountInput.value = '';
