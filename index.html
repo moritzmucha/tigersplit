@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>kittysplit-style group payment solver</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 800px;
+      margin: 20px auto;
+      padding: 0 10px;
+    }
+    form {
+      margin-bottom: 20px;
+    }
+    label {
+      display: inline-block;
+      width: 60px;
+    }
+    input[type="text"], input[type="number"] {
+      margin-right: 10px;
+    }
+    #balances-table, #transactions-table {
+      border-collapse: collapse;
+      margin: 10px 0;
+    }
+    #balances-table td, #transactions-table td,
+    #balances-table th, #transactions-table th {
+      border: 1px solid #aaa;
+      padding: 6px 8px;
+    }
+    #graph {
+      border: 1px solid #aaa;
+      width: 600px;
+      height: 400px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>group payment solver</h1>
+
+  <form id="expense-form">
+    <label for="name">name:</label>
+    <input type="text" id="name" required />
+    <label for="amount">paid:</label>
+    <input type="number" step="0.01" id="amount" required />
+    <button type="submit">add expense</button>
+  </form>
+
+  <button id="recalc-btn">recalculate / settle up</button>
+
+  <h3>balances</h3>
+  <table id="balances-table">
+    <thead>
+      <tr><th>user</th><th>paid total</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>transactions</h3>
+  <table id="transactions-table">
+    <thead>
+      <tr><th>payer</th><th>payee</th><th>amount</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>graph visualization</h3>
+  <div id="graph"></div>
+
+  <!-- load d3 from CDN -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  <script>
+    /*****************************************************************************
+     * data store: who has paid how much
+     ****************************************************************************/
+    const balances = {}; // e.g. { "alice": 120.0, "bob": 45.0, ... }
+
+    /*****************************************************************************
+     * utility: add expense
+     ****************************************************************************/
+    function addExpense(name, amount) {
+      if (!balances[name]) {
+        balances[name] = 0;
+      }
+      balances[name] += amount;
+    }
+
+    /*****************************************************************************
+     * utility: settle up
+     * returns array of transactions: [ { payer, payee, amount }, ... ]
+     ****************************************************************************/
+    function settleUp() {
+      const users = Object.keys(balances);
+      if (users.length === 0) return [];
+      const total = Object.values(balances).reduce((a, b) => a + b, 0);
+      const avg = total / users.length;
+
+      // netMap[user] = how much user is above (pos) or below (neg) the average
+      const netMap = {};
+      users.forEach(u => {
+        netMap[u] = balances[u] - avg;
+      });
+
+      // separate into debtors and creditors
+      // store as array of objects for convenience
+      let debtors = [];
+      let creditors = [];
+      for (const [user, net] of Object.entries(netMap)) {
+        if (net < -1e-9) {
+          debtors.push({ user, amount: -net });
+        } else if (net > 1e-9) {
+          creditors.push({ user, amount: net });
+        }
+      }
+
+      // sort to maintain consistent ordering (optional)
+      debtors.sort((a, b) => a.user.localeCompare(b.user));
+      creditors.sort((a, b) => a.user.localeCompare(b.user));
+
+      const transactions = [];
+      let i = 0, j = 0;
+      while (i < debtors.length && j < creditors.length) {
+        const debtor = debtors[i];
+        const creditor = creditors[j];
+        const settled = Math.min(debtor.amount, creditor.amount);
+
+        transactions.push({
+          payer: debtor.user,
+          payee: creditor.user,
+          amount: settled
+        });
+
+        debtor.amount -= settled;
+        creditor.amount -= settled;
+
+        if (Math.abs(debtor.amount) < 1e-9) i++;
+        if (Math.abs(creditor.amount) < 1e-9) j++;
+      }
+
+      return transactions;
+    }
+
+    /*****************************************************************************
+     * DOM manipulation
+     ****************************************************************************/
+    const expenseForm = document.getElementById('expense-form');
+    const nameInput = document.getElementById('name');
+    const amountInput = document.getElementById('amount');
+    const balancesTableBody = document.querySelector('#balances-table tbody');
+    const transactionsTableBody = document.querySelector('#transactions-table tbody');
+    const recalcBtn = document.getElementById('recalc-btn');
+
+    // on form submit, add expense, then update table
+    expenseForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const name = nameInput.value.trim();
+      const amt = parseFloat(amountInput.value);
+      if (!name || isNaN(amt)) return;
+      addExpense(name, amt);
+
+      nameInput.value = '';
+      amountInput.value = '';
+      updateUI();
+    });
+
+    // on recalc, compute transactions, update transaction table + graph
+    recalcBtn.addEventListener('click', () => {
+      updateUI();
+    });
+
+    function updateUI() {
+      // update balances table
+      balancesTableBody.innerHTML = '';
+      for (const [user, amt] of Object.entries(balances)) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${user}</td>
+          <td>${amt.toFixed(2)}</td>
+        `;
+        balancesTableBody.appendChild(row);
+      }
+
+      // compute transactions
+      const txs = settleUp();
+      transactionsTableBody.innerHTML = '';
+      txs.forEach(t => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${t.payer}</td>
+          <td>${t.payee}</td>
+          <td>${t.amount.toFixed(2)}</td>
+        `;
+        transactionsTableBody.appendChild(row);
+      });
+
+      // redraw graph
+      drawGraph(txs);
+    }
+
+    /*****************************************************************************
+     * d3 visualization: force-directed graph of payers -> payees
+     ****************************************************************************/
+    function drawGraph(transactions) {
+      // remove any existing svg
+      d3.select('#graph').selectAll('svg').remove();
+
+      // extract all unique users into 'nodes'
+      const allUsers = new Set();
+      transactions.forEach(t => {
+        allUsers.add(t.payer);
+        allUsers.add(t.payee);
+      });
+      // in case no transactions yet, also add from balances
+      Object.keys(balances).forEach(u => allUsers.add(u));
+
+      // build node array
+      const nodes = Array.from(allUsers).map(u => ({ id: u }));
+
+      // build link array
+      const links = transactions.map(t => ({
+        source: t.payer,
+        target: t.payee,
+        value: t.amount
+      }));
+
+      // basic dimensions
+      const width = 600, height = 400;
+
+      const svg = d3.select('#graph')
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height);
+
+      // setup simulation
+      const simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(120))
+        .force('charge', d3.forceManyBody().strength(-300))
+        .force('center', d3.forceCenter(width / 2, height / 2));
+
+      // draw links
+      const link = svg.selectAll('line')
+        .data(links)
+        .enter()
+        .append('line')
+        .style('stroke', '#999')
+        .style('stroke-width', d => Math.sqrt(d.value));
+
+      // draw nodes
+      const node = svg.selectAll('circle')
+        .data(nodes)
+        .enter()
+        .append('circle')
+        .attr('r', 20)
+        .style('fill', 'steelblue')
+        .call(d3.drag()
+          .on('start', (event, d) => {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+          })
+          .on('drag', (event, d) => {
+            d.fx = event.x;
+            d.fy = event.y;
+          })
+          .on('end', (event, d) => {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+          })
+        );
+
+      // labels for nodes
+      const label = svg.selectAll('.nodelabel')
+        .data(nodes)
+        .enter()
+        .append('text')
+        .attr('class', 'nodelabel')
+        .attr('text-anchor', 'middle')
+        .attr('dy', '.35em')
+        .style('pointer-events', 'none')
+        .text(d => d.id)
+        .style('fill', '#fff')
+        .style('font-weight', 'bold');
+
+      simulation.on('tick', () => {
+        link
+          .attr('x1', d => d.source.x)
+          .attr('y1', d => d.source.y)
+          .attr('x2', d => d.target.x)
+          .attr('y2', d => d.target.y);
+
+        node
+          .attr('cx', d => d.x)
+          .attr('cy', d => d.y);
+
+        label
+          .attr('x', d => d.x)
+          .attr('y', d => d.y);
+      });
+    }
+
+    // initial ui draw
+    updateUI();
+  </script>
+</body>
+</html>
