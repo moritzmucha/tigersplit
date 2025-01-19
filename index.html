@@ -4,14 +4,23 @@
   <meta charset="UTF-8" />
   <title>tigersplit</title>
   <style>
+    /* base styles */
     body {
       font-family: sans-serif;
-      max-width: 800px;
-      margin: 20px auto;
-      padding: 0 10px;
+      margin: 0 auto;
+      padding: 0 20px;
+      max-width: 1000px;
+      transition: background-color 0.3s, color 0.3s;
     }
-    form {
+    h1, h2, h3, h4 {
+      margin-top: 1em;
+      margin-bottom: 0.5em;
+    }
+    .form-section {
       margin-bottom: 20px;
+      border: 1px solid #aaa;
+      padding: 10px;
+      border-radius: 4px;
     }
     label {
       display: inline-block;
@@ -20,45 +29,109 @@
     input[type="text"], input[type="number"] {
       margin-right: 10px;
     }
-    #balances-table, #transactions-table {
-      border-collapse: collapse;
-      margin: 10px 0;
+    button {
+      margin: 5px 0;
     }
-    #balances-table td, #transactions-table td,
-    #balances-table th, #transactions-table th {
+    table {
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      width: 100%;
+    }
+    th, td {
       border: 1px solid #aaa;
       padding: 6px 8px;
+      text-align: left;
     }
+    /* dark mode styles */
+    body.dark-mode {
+      background-color: #222;
+      color: #ddd;
+    }
+    body.dark-mode table, 
+    body.dark-mode th, 
+    body.dark-mode td {
+      border-color: #555;
+    }
+    .dark-mode-btn {
+      float: right;
+      margin-top: 10px;
+    }
+    /* graph container */
     #graph {
       border: 1px solid #aaa;
-      width: 600px;
-      height: 400px;
+      width: 100%;
+      height: 500px;
       margin: 20px 0;
+      overflow: hidden;
     }
   </style>
 </head>
-<body>
+<body class="dark-mode">
   <h1>group payment solver</h1>
+  <button class="dark-mode-btn" id="toggle-dark">toggle dark mode</button>
 
-  <form id="expense-form">
-    <label for="name">name:</label>
-    <input type="text" id="name" required />
-    <label for="amount">paid:</label>
-    <input type="number" step="0.01" id="amount" required />
-    <button type="submit">add expense</button>
-  </form>
+  <div class="form-section">
+    <h2>add expense</h2>
+    <form id="expense-form">
+      <label>name:</label>
+      <input type="text" id="expense-name" required />
+      <label>paid:</label>
+      <input type="number" step="0.01" id="expense-amount" required />
+      <br />
+      <label>label:</label>
+      <input type="text" id="expense-label" placeholder="optional description" />
+      <button type="submit">add expense</button>
+    </form>
+  </div>
+
+  <div class="form-section">
+    <h2>add payment (node-to-node)</h2>
+    <form id="payment-form">
+      <label>from:</label>
+      <input type="text" id="payment-from" required />
+      <label>to:</label>
+      <input type="text" id="payment-to" required />
+      <label>amount:</label>
+      <input type="number" step="0.01" id="payment-amount" required />
+      <button type="submit">add payment</button>
+    </form>
+  </div>
 
   <button id="recalc-btn">recalculate / settle up</button>
 
-  <h3>balances</h3>
-  <table id="balances-table">
+  <h3>all expenses</h3>
+  <table id="expenses-table">
     <thead>
-      <tr><th>user</th><th>paid total</th></tr>
+      <tr>
+        <th>payer</th>
+        <th>amount</th>
+        <th>label</th>
+      </tr>
     </thead>
     <tbody></tbody>
   </table>
 
-  <h3>transactions</h3>
+  <h3>all payments</h3>
+  <table id="payments-table">
+    <thead>
+      <tr>
+        <th>from</th>
+        <th>to</th>
+        <th>amount</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>balances</h3>
+  <table id="balances-table">
+    <thead>
+      <tr><th>user</th><th>paid total (net)</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>settle-up transactions</h3>
   <table id="transactions-table">
     <thead>
       <tr><th>payer</th><th>payee</th><th>amount</th></tr>
@@ -69,30 +142,104 @@
   <h3>graph visualization</h3>
   <div id="graph"></div>
 
-  <!-- load d3 from CDN -->
-  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <!-- d3 for the force-directed graph -->
+  <script
+    src="https://d3js.org/d3.v7.min.js"
+    integrity="DQo5aAM/Pz8/UgwFJD8/PT8/Xz8/Pz8wPwU/Pz8/IT8/P19bOD8OPz4aV3Y/Hz8/Pw0K"
+    crossorigin="anonymous">
+  </script>
 
   <script>
     /*****************************************************************************
-     * data store: who has paid how much
+     * global data
      ****************************************************************************/
-    const balances = {}; // e.g. { "alice": 120.0, "bob": 45.0, ... }
+    const expenses = []; // each expense: { payer, amount, label }
+    const payments = []; // each payment: { from, to, amount }
 
     /*****************************************************************************
-     * utility: add expense
+     * forms + event listeners
      ****************************************************************************/
-    function addExpense(name, amount) {
-      if (!balances[name]) {
-        balances[name] = 0;
+    const expenseForm = document.getElementById('expense-form');
+    const paymentForm = document.getElementById('payment-form');
+    const recalcBtn = document.getElementById('recalc-btn');
+
+    const expenseNameInput = document.getElementById('expense-name');
+    const expenseAmountInput = document.getElementById('expense-amount');
+    const expenseLabelInput = document.getElementById('expense-label');
+    const paymentFromInput = document.getElementById('payment-from');
+    const paymentToInput = document.getElementById('payment-to');
+    const paymentAmountInput = document.getElementById('payment-amount');
+
+    const expensesTableBody = document.querySelector('#expenses-table tbody');
+    const paymentsTableBody = document.querySelector('#payments-table tbody');
+    const balancesTableBody = document.querySelector('#balances-table tbody');
+    const transactionsTableBody = document.querySelector('#transactions-table tbody');
+
+    expenseForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const name = expenseNameInput.value.trim();
+      const amount = parseFloat(expenseAmountInput.value);
+      const label = expenseLabelInput.value.trim();
+      if (!name || isNaN(amount)) return;
+      expenses.push({ payer: name, amount, label });
+      expenseNameInput.value = '';
+      expenseAmountInput.value = '';
+      expenseLabelInput.value = '';
+      updateUI();
+    });
+
+    paymentForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const from = paymentFromInput.value.trim();
+      const to = paymentToInput.value.trim();
+      const amount = parseFloat(paymentAmountInput.value);
+      if (!from || !to || isNaN(amount)) return;
+      payments.push({ from, to, amount });
+      paymentFromInput.value = '';
+      paymentToInput.value = '';
+      paymentAmountInput.value = '';
+      updateUI();
+    });
+
+    recalcBtn.addEventListener('click', () => {
+      updateUI();
+    });
+
+    // dark mode toggle
+    const toggleDarkBtn = document.getElementById('toggle-dark');
+    toggleDarkBtn.addEventListener('click', () => {
+      document.body.classList.toggle('dark-mode');
+    });
+
+    /*****************************************************************************
+     * compute overall balances from expenses + payments
+     * returns an object { user: netAmount, ... }
+     ****************************************************************************/
+    function computeBalances() {
+      const bal = {};
+
+      // sum up all expenses
+      for (const exp of expenses) {
+        if (!bal[exp.payer]) bal[exp.payer] = 0;
+        bal[exp.payer] += exp.amount;
       }
-      balances[name] += amount;
+
+      // apply payments: from X to Y is effectively X pays out, Y receives
+      for (const pay of payments) {
+        if (!bal[pay.from]) bal[pay.from] = 0;
+        if (!bal[pay.to]) bal[pay.to] = 0;
+        bal[pay.from] += pay.amount;
+        bal[pay.to] -= pay.amount;
+      }
+
+      return bal;
     }
 
     /*****************************************************************************
-     * utility: settle up
+     * settle up
      * returns array of transactions: [ { payer, payee, amount }, ... ]
      ****************************************************************************/
-    function settleUp() {
+    function settleUp(balances) {
       const users = Object.keys(balances);
       if (users.length === 0) return [];
       const total = Object.values(balances).reduce((a, b) => a + b, 0);
@@ -100,12 +247,10 @@
 
       // netMap[user] = how much user is above (pos) or below (neg) the average
       const netMap = {};
-      users.forEach(u => {
+      for (let u of users) {
         netMap[u] = balances[u] - avg;
-      });
+      }
 
-      // separate into debtors and creditors
-      // store as array of objects for convenience
       let debtors = [];
       let creditors = [];
       for (const [user, net] of Object.entries(netMap)) {
@@ -116,75 +261,71 @@
         }
       }
 
-      // sort to maintain consistent ordering (optional)
-      debtors.sort((a, b) => a.user.localeCompare(b.user));
-      creditors.sort((a, b) => a.user.localeCompare(b.user));
+      debtors.sort((a,b) => a.user.localeCompare(b.user));
+      creditors.sort((a,b) => a.user.localeCompare(b.user));
 
       const transactions = [];
-      let i = 0, j = 0;
+      let i=0, j=0;
       while (i < debtors.length && j < creditors.length) {
-        const debtor = debtors[i];
-        const creditor = creditors[j];
-        const settled = Math.min(debtor.amount, creditor.amount);
-
+        const settled = Math.min(debtors[i].amount, creditors[j].amount);
         transactions.push({
-          payer: debtor.user,
-          payee: creditor.user,
+          payer: debtors[i].user,
+          payee: creditors[j].user,
           amount: settled
         });
-
-        debtor.amount -= settled;
-        creditor.amount -= settled;
-
-        if (Math.abs(debtor.amount) < 1e-9) i++;
-        if (Math.abs(creditor.amount) < 1e-9) j++;
+        debtors[i].amount -= settled;
+        creditors[j].amount -= settled;
+        if (Math.abs(debtors[i].amount) < 1e-9) i++;
+        if (Math.abs(creditors[j].amount) < 1e-9) j++;
       }
 
       return transactions;
     }
 
     /*****************************************************************************
-     * DOM manipulation
+     * update UI
      ****************************************************************************/
-    const expenseForm = document.getElementById('expense-form');
-    const nameInput = document.getElementById('name');
-    const amountInput = document.getElementById('amount');
-    const balancesTableBody = document.querySelector('#balances-table tbody');
-    const transactionsTableBody = document.querySelector('#transactions-table tbody');
-    const recalcBtn = document.getElementById('recalc-btn');
-
-    // on form submit, add expense, then update table
-    expenseForm.addEventListener('submit', e => {
-      e.preventDefault();
-      const name = nameInput.value.trim();
-      const amt = parseFloat(amountInput.value);
-      if (!name || isNaN(amt)) return;
-      addExpense(name, amt);
-
-      nameInput.value = '';
-      amountInput.value = '';
-      updateUI();
-    });
-
-    // on recalc, compute transactions, update transaction table + graph
-    recalcBtn.addEventListener('click', () => {
-      updateUI();
-    });
-
     function updateUI() {
-      // update balances table
-      balancesTableBody.innerHTML = '';
-      for (const [user, amt] of Object.entries(balances)) {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${user}</td>
-          <td>${amt.toFixed(2)}</td>
+      // show all expenses
+      expensesTableBody.innerHTML = '';
+      for (const exp of expenses) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${exp.payer}</td>
+          <td>${exp.amount.toFixed(2)}</td>
+          <td>${exp.label || ''}</td>
         `;
-        balancesTableBody.appendChild(row);
+        expensesTableBody.appendChild(tr);
       }
 
-      // compute transactions
-      const txs = settleUp();
+      // show all payments
+      paymentsTableBody.innerHTML = '';
+      for (const pay of payments) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${pay.from}</td>
+          <td>${pay.to}</td>
+          <td>${pay.amount.toFixed(2)}</td>
+        `;
+        paymentsTableBody.appendChild(tr);
+      }
+
+      // compute balances
+      const balances = computeBalances();
+
+      // update balances table
+      balancesTableBody.innerHTML = '';
+      for (const [user, amount] of Object.entries(balances)) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${user}</td>
+          <td>${amount.toFixed(2)}</td>
+        `;
+        balancesTableBody.appendChild(tr);
+      }
+
+      // compute settle-up
+      const txs = settleUp(balances);
       transactionsTableBody.innerHTML = '';
       txs.forEach(t => {
         const row = document.createElement('tr');
@@ -196,51 +337,45 @@
         transactionsTableBody.appendChild(row);
       });
 
-      // redraw graph
       drawGraph(txs);
     }
 
     /*****************************************************************************
-     * d3 visualization: force-directed graph of payers -> payees
+     * draw d3 force-directed graph
      ****************************************************************************/
     function drawGraph(transactions) {
       // remove any existing svg
       d3.select('#graph').selectAll('svg').remove();
 
-      // extract all unique users into 'nodes'
-      const allUsers = new Set();
-      transactions.forEach(t => {
-        allUsers.add(t.payer);
-        allUsers.add(t.payee);
-      });
-      // in case no transactions yet, also add from balances
-      Object.keys(balances).forEach(u => allUsers.add(u));
+      // gather all unique users from both the data + transactions
+      const userSet = new Set();
+      for (const exp of expenses) { userSet.add(exp.payer); }
+      for (const pay of payments) { userSet.add(pay.from); userSet.add(pay.to); }
+      for (const t of transactions) { userSet.add(t.payer); userSet.add(t.payee); }
+      const nodes = Array.from(userSet).map(u => ({ id: u }));
 
-      // build node array
-      const nodes = Array.from(allUsers).map(u => ({ id: u }));
-
-      // build link array
+      // build links from the settle-up transactions
       const links = transactions.map(t => ({
         source: t.payer,
         target: t.payee,
         value: t.amount
       }));
 
-      // basic dimensions
-      const width = 600, height = 400;
+      const graphContainer = document.getElementById('graph');
+      const width = graphContainer.clientWidth;
+      const height = graphContainer.clientHeight;
 
       const svg = d3.select('#graph')
         .append('svg')
         .attr('width', width)
         .attr('height', height);
 
-      // setup simulation
       const simulation = d3.forceSimulation(nodes)
         .force('link', d3.forceLink(links).id(d => d.id).distance(120))
         .force('charge', d3.forceManyBody().strength(-300))
         .force('center', d3.forceCenter(width / 2, height / 2));
 
-      // draw links
+      // links
       const link = svg.selectAll('line')
         .data(links)
         .enter()
@@ -248,7 +383,7 @@
         .style('stroke', '#999')
         .style('stroke-width', d => Math.sqrt(d.value));
 
-      // draw nodes
+      // nodes
       const node = svg.selectAll('circle')
         .data(nodes)
         .enter()
@@ -272,7 +407,7 @@
           })
         );
 
-      // labels for nodes
+      // labels
       const label = svg.selectAll('.nodelabel')
         .data(nodes)
         .enter()
@@ -302,7 +437,7 @@
       });
     }
 
-    // initial ui draw
+    // initial render
     updateUI();
   </script>
 </body>
