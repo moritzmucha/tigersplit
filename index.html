@@ -172,12 +172,12 @@
     const transactionsTableBody = document.querySelector('#transactions-table tbody');
 
     expenseForm.addEventListener('submit', e => {
-    e.preventDefault();
-    const name = expenseNameInput.value.trim().toLowerCase();
-    const amount = parseFloat(expenseAmountInput.value);
-    const label = expenseLabelInput.value.trim();
-    if (!name || isNaN(amount)) return;
-    expenses.push({ payer: name, amount, label });
+      e.preventDefault();
+      const name = expenseNameInput.value.trim().toLowerCase();
+      const amount = parseFloat(expenseAmountInput.value);
+      const label = expenseLabelInput.value.trim();
+      if (!name || isNaN(amount)) return;
+      expenses.push({ payer: name, amount, label });
       expenseNameInput.value = '';
       expenseAmountInput.value = '';
       expenseLabelInput.value = '';
@@ -186,12 +186,12 @@
     });
 
     paymentForm.addEventListener('submit', e => {
-    e.preventDefault();
-    const from = paymentFromInput.value.trim().toLowerCase();
-    const to = paymentToInput.value.trim().toLowerCase();
-    const amount = parseFloat(paymentAmountInput.value);
-    if (!from || !to || isNaN(amount)) return;
-    payments.push({ from, to, amount });
+      e.preventDefault();
+      const from = paymentFromInput.value.trim().toLowerCase();
+      const to = paymentToInput.value.trim().toLowerCase();
+      const amount = parseFloat(paymentAmountInput.value);
+      if (!from || !to || isNaN(amount)) return;
+      payments.push({ from, to, amount });
       paymentFromInput.value = '';
       paymentToInput.value = '';
       paymentAmountInput.value = '';
