@@ -182,6 +182,7 @@
       expenseAmountInput.value = '';
       expenseLabelInput.value = '';
       updateUI();
+      expenseNameInput.focus();
     });
 
     paymentForm.addEventListener('submit', e => {
@@ -195,6 +196,7 @@
       paymentToInput.value = '';
       paymentAmountInput.value = '';
       updateUI();
+      paymentFromInput.focus();
     });
 
     recalcBtn.addEventListener('click', () => {
